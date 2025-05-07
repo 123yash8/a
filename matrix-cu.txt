@@ -1,0 +1,153 @@
+%%writefile matrix.cu
+
+#include <iostream>
+#include <cuda.h>
+#include <cstdlib>  // For rand()
+#include <ctime>    // For time()
+
+using namespace std;
+
+#define BLOCK_SIZE 2
+
+__global__ void gpuMM(float *A, float *B, float *C, int N)
+{
+    // Matrix multiplication for NxN matrices C=A*B
+    // Each thread computes a single element of C
+    int row = blockIdx.y*blockDim.y + threadIdx.y;
+    int col = blockIdx.x*blockDim.x + threadIdx.x;
+
+    float sum = 0.f;
+    for (int n = 0; n < N; ++n)
+        sum += A[row*N+n]*B[n*N+col];
+
+    C[row*N+col] = sum;
+}
+
+void randomInit(float* matrix, int size)
+{
+    for (int i = 0; i < size; ++i) {
+        matrix[i] = static_cast<float>(rand()) / RAND_MAX * 10.0f; // Random between 0-10
+    }
+}
+
+int main(int argc, char *argv[])
+{
+    int N;
+    char choice;
+    
+    // Seed random number generator
+    srand(time(0));
+    
+    cout << "Enter the size of the square matrix (must be multiple of " << BLOCK_SIZE << "): ";
+    cin >> N;
+    
+    // Verify N is a multiple of BLOCK_SIZE
+    if (N % BLOCK_SIZE != 0) {
+        cout << "Error: Matrix size must be a multiple of " << BLOCK_SIZE << endl;
+        return 1;
+    }
+    
+    cout << "\nInitialize matrices:\n";
+    cout << "1. Manually enter values\n";
+    cout << "2. Random initialization\n";
+    cout << "Enter your choice (1 or 2): ";
+    cin >> choice;
+
+    cout << "\nExecuting Matrix Multiplication" << endl;
+    cout << "Matrix size: " << N << "x" << N << endl;
+
+    // Allocate memory on the host
+    float *hA, *hB, *hC;
+    hA = new float[N*N];
+    hB = new float[N*N];
+    hC = new float[N*N];
+
+    // Initialize matrices
+    if (choice == '1') {
+        // Manual input
+        cout << "\nEnter values for Matrix A (" << N << "x" << N << "):" << endl;
+        for (int j=0; j<N; j++) {
+            for (int i=0; i<N; i++) {
+                cout << "A[" << j << "][" << i << "]: ";
+                cin >> hA[j*N+i];
+            }
+        }
+        
+        cout << "\nEnter values for Matrix B (" << N << "x" << N << "):" << endl;
+        for (int j=0; j<N; j++) {
+            for (int i=0; i<N; i++) {
+                cout << "B[" << j << "][" << i << "]: ";
+                cin >> hB[j*N+i];
+            }
+        }
+    } else {
+        // Random initialization
+        randomInit(hA, N*N);
+        randomInit(hB, N*N);
+        
+        cout << "\nMatrices initialized with random values (0-10)" << endl;
+    }
+
+    // Allocate memory on the device
+    int size = N*N*sizeof(float);
+    float *dA, *dB, *dC;
+    cudaMalloc(&dA, size);
+    cudaMalloc(&dB, size);
+    cudaMalloc(&dC, size);
+
+    dim3 threadBlock(BLOCK_SIZE, BLOCK_SIZE);
+    dim3 grid(N/BLOCK_SIZE, N/BLOCK_SIZE);
+    
+    cout << "\nInput Matrix A:\n";
+    for (int row=0; row<N; row++) {
+        for (int col=0; col<N; col++) {
+            cout << hA[row*N+col] << " ";
+        }
+        cout << endl;
+    }
+    
+    cout << "\nInput Matrix B:\n";
+    for (int row=0; row<N; row++) {
+        for (int col=0; col<N; col++) {
+            cout << hB[row*N+col] << " ";
+        }
+        cout << endl;
+    }
+    
+    // Copy matrices from host to device
+    cudaMemcpy(dA, hA, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(dB, hB, size, cudaMemcpyHostToDevice);
+
+    // Execute matrix multiplication kernel
+    gpuMM<<<grid, threadBlock>>>(dA, dB, dC, N);
+
+    // Allocate memory for result on host
+    float *C = new float[N*N];
+
+    // Copy result back to host
+    cudaMemcpy(C, dC, size, cudaMemcpyDeviceToHost);
+
+    // Display the result
+    cout << "\nResultant matrix C = A*B:\n";
+    for (int row=0; row<N; row++) {
+        for (int col=0; col<N; col++) {
+            cout << C[row*N+col] << "\t";
+        }
+        cout << endl;
+    }
+
+    // Free memory
+    delete[] hA;
+    delete[] hB;
+    delete[] hC;
+    delete[] C;
+    cudaFree(dA);
+    cudaFree(dB);
+    cudaFree(dC);
+
+    cout << "\nFinished." << endl;
+    return 0;
+}
+!!nvidia-smi -L
+!nvcc -arch=sm_75 matrix.cu -o matrix
+!./matrix
